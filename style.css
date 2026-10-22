@@ -59,11 +59,22 @@ body::after {
 /* ---- 刊頭 ---- */
 .mast { padding-top: 20px; }
 .mast-meta {
-  display: flex; justify-content: space-between; gap: 12px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
   font: 500 11px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
-  padding-bottom: 12px; border-bottom: var(--thin);
+  padding-bottom: 10px; border-bottom: var(--thin);
 }
-.mast-meta span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-fg); }
+
+/* 中／EN 切換：兩格相連的方塊，選中的反白 */
+.lang { display: flex; flex: none; border: var(--thin); }
+.lang button {
+  min-height: 30px; min-width: 40px; padding: 0 10px;
+  background: transparent; color: var(--fg); border: 0;
+  font: 500 11px/1 var(--font-mono); letter-spacing: .08em;
+}
+.lang button + button { border-left: var(--thin); }
+.lang button:hover { background: var(--muted); }
+.lang button.on { background: var(--fg); color: var(--bg); }
+.lang button:focus-visible { outline-offset: 2px; }
 .mast h1 {
   font: 900 clamp(2.5rem, 12vw, 4rem)/1 var(--font-display);
   letter-spacing: -.03em;
@@ -259,7 +270,11 @@ nav.tabs button:focus-visible { outline-offset: -5px; outline-color: currentColo
 
 /* ---- 登入／初次設定 ---- */
 .auth { padding: 9vh 0 48px; }
-.auth .kicker { font: 500 11px/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase; padding-bottom: 12px; border-bottom: var(--thin); }
+.auth .kicker {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  font: 500 11px/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase;
+  padding-bottom: 10px; border-bottom: var(--thin);
+}
 .auth h1 { font: 900 clamp(3.25rem, 17vw, 6rem)/1.08 var(--font-display); letter-spacing: -.04em; margin: 22px 0 18px; }
 .auth .lede { font: italic 400 19px/1.5 var(--font-body); color: var(--muted-fg); margin: 18px 0 0; }
 .auth .card { margin-top: 32px; }
@@ -287,3 +302,8 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; }
 
 /* 數字一律用等高、等寬數字（放最後，因為 font 簡寫會重設它） */
 .num, .row .amt, .stat .v, .hero .big, .cat .top .num { font-variant-numeric: lining-nums tabular-nums; }
+
+/* 英文版：小標籤全大寫，像雜誌的欄目名 */
+:lang(en) label, :lang(en) .stat .k, :lang(en) .hero .label, :lang(en) nav.tabs button { text-transform: uppercase; }
+:lang(en) label .hint { text-transform: none; }
+:lang(en) .mast h1 { font-size: clamp(2.5rem, 11vw, 4rem); }

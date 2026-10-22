@@ -114,7 +114,8 @@ budget-app/
 ├── js/
 │   ├── app.js          畫面和操作
 │   ├── calc.js         計算核心（帳單歸期、現金流、可花金額）
-│   └── db.js           資料存取（Supabase 或示範模式的 localStorage）
+│   ├── db.js           資料存取（Supabase 或示範模式的 localStorage）
+│   └── i18n.js         中英文字串（右上角「中／EN」切換）
 └── supabase/
     └── schema.sql      資料庫結構
 ```

@@ -125,15 +125,15 @@ export function forecast(state, t = today(), extraPurchases = []) {
 
   const events = [];
   for (const b of unpaid) {
-    events.push({ type: 'bill', date: b.due < t ? t : b.due, due: b.due, amount: -b.remaining, label: `${b.method_name} 帳單`, key: b.key, overdue: b.due < t });
+    events.push({ type: 'bill', date: b.due < t ? t : b.due, due: b.due, amount: -b.remaining, name: b.method_name, key: b.key, overdue: b.due < t });
   }
   for (const o of recurringDue(recurring, transactions, horizon)) {
-    events.push({ type: 'recurring', date: o.date < t ? t : o.date, due: o.date, amount: -o.amount, label: o.recurring.name, rid: o.recurring.id, overdue: o.date < t });
+    events.push({ type: 'recurring', date: o.date < t ? t : o.date, due: o.date, amount: -o.amount, name: o.recurring.name, rid: o.recurring.id, overdue: o.date < t });
   }
   for (const d of allowanceDates(t, horizon)) {
     const day = Number(d.slice(8));
     const amount = Number(day === 5 ? settings.allowance_5 : settings.allowance_20) || 0;
-    if (amount > 0) events.push({ type: 'allowance', date: d, due: d, amount, label: `${day} 號零用錢` });
+    if (amount > 0) events.push({ type: 'allowance', date: d, due: d, amount, day });
   }
   // 同一天先進帳再扣款
   events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : b.amount - a.amount));
