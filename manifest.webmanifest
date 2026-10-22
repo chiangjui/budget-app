@@ -1,0 +1,14 @@
+{
+  "name": "零用錢管家 Allowance Ledger",
+  "short_name": "零用錢管家",
+  "description": "知道還完帳單之後，現在還能花多少。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

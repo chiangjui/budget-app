@@ -4,6 +4,7 @@ const STORAGE_KEY = 'budget-lang';
 
 const zh = {
   appName: '零用錢管家',
+  homeScreenName: '零用錢管家',
   appNameHtml: '零用錢<br>管家',
   kicker: 'The Allowance Ledger',
   tagline: '知道還完帳單之後，現在還能花多少。',
@@ -174,6 +175,7 @@ const ordinal = (n) => `${n}${n === 1 || n === 21 || n === 31 ? 'st' : n === 2 |
 
 const en = {
   appName: 'Allowance Ledger',
+  homeScreenName: 'Allowance',
   appNameHtml: 'Allowance<br>Ledger',
   kicker: '零用錢管家',
   tagline: 'Know what you can still spend after every bill is paid.',
@@ -365,6 +367,8 @@ export function setLang(next) {
   try { localStorage.setItem(STORAGE_KEY, next); } catch { /* 只是記住偏好，失敗也沒關係 */ }
   document.documentElement.lang = next === 'zh' ? 'zh-Hant' : 'en';
   document.title = t('appName');
+  // 加入主畫面時圖示下面的名字（太長會被 iPhone 截掉）
+  document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', t('homeScreenName'));
 }
 
 export function t(key, ...args) {
