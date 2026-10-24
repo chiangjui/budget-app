@@ -1,5 +1,5 @@
 import * as db from './db.js';
-import { today, parse, addDays, forecast, dueDateFor, splitInstallments, recurringDue, allowanceDates, currentBalance } from './calc.js';
+import { today, parse, addDays, forecast, installmentDue, hasSchedule, splitInstallments, recurringDue, allowanceDates, currentBalance } from './calc.js';
 import { t, lang, setLang, category, weekday } from './i18n.js';
 
 // 分類存進資料庫時用中文，顯示時再翻譯
@@ -277,6 +277,11 @@ function viewAdd() {
         </div>
         ${categoryChips('category', '購物')}
         ${dateNote(t('purchaseDate'))}
+        <div class="due-block">
+          <label class="check"><input type="checkbox" name="manual_due" value="1"><span>${t('manualDue')}</span></label>
+          <p class="footnote due-forced" hidden>${t('dueForced')}</p>
+          <label class="due-field" hidden>${t('dueDate')}<input type="date" name="due_date"><span class="hint">${t('dueDateHint')}</span></label>
+        </div>
         <div class="preview" id="bnpl-preview"></div>
         <button>${t('record')}</button>
       </form>`
@@ -292,19 +297,36 @@ function viewAdd() {
   return `<div class="seg">${modes.map(([id, name]) => `<button data-action="add-mode" data-mode="${id}" class="${state.addMode === id ? 'on' : ''}">${name}</button>`).join('')}</div>${form}`;
 }
 
+// 「自己填繳款日」的開關：沒有結帳日的付款方式一定要填。回傳這筆是不是自己填
+function syncDueField(form, method) {
+  const check = form.elements.manual_due;
+  const input = form.elements.due_date;
+  const forced = !hasSchedule(method);
+  if (forced) check.checked = true;
+  check.disabled = forced;
+  form.querySelector('.due-forced').hidden = !forced;
+  form.querySelector('.due-field').hidden = !check.checked;
+  input.required = check.checked;
+  // 剛打開時先帶入照結帳日算出來的日期，方便直接改
+  if (check.checked && !input.value && !forced) input.value = installmentDue({ date: form.elements.date.value || today() }, method);
+  return check.checked;
+}
+
 // 先用後付：即時顯示什麼時候要繳、刷下去之後還能花多少
 function updateBnplPreview() {
   const form = $app.querySelector('form[data-form="bnpl"]');
   const box = document.getElementById('bnpl-preview');
   if (!form || !box) return;
+  const method = state.payment_methods.find((m) => m.id === form.elements.method_id.value);
+  const manual = method ? syncDueField(form, method) : false;
   const d = Object.fromEntries(new FormData(form));
   const amount = Number(d.amount);
-  const method = state.payment_methods.find((m) => m.id === d.method_id);
-  if (!(amount > 0) || !method || !d.date) { box.textContent = ''; return; }
+  if (!(amount > 0) || !method || !d.date || (manual && !d.due_date)) { box.textContent = ''; return; }
   const n = Number(d.installments);
+  const purchase = { id: 'preview', method_id: method.id, date: d.date, amount, installments: n, due_date: manual ? d.due_date : null };
   const parts = splitInstallments(amount, n);
-  const dues = parts.map((_, i) => dueDateFor(d.date, method, i));
-  const after = forecast(calcState(), today(), [{ id: 'preview', method_id: method.id, date: d.date, amount, installments: n }]);
+  const dues = parts.map((_, i) => installmentDue(purchase, method, i));
+  const after = forecast(calcState(), today(), [purchase]);
   const when = n === 1 ? t('previewOnce', md(dues[0]), money(amount)) : t('previewSplit', md(dues[0]), money(parts[1]), md(dues[n - 1]));
   box.className = `preview ${after.safe < 0 ? 'bad' : ''}`;
   box.innerHTML = after.safe < 0
@@ -394,7 +416,7 @@ function viewHistory() {
   const row = (it) => {
     const sign = it.kind === 'income' ? '+' : '-';
     const meta = it.kind === 'bnpl'
-      ? `${esc(methodName[it.method_id] ?? '')}${it.installments > 1 ? ` · ${t('splitInto', it.installments)}` : ''}`
+      ? `${esc(methodName[it.method_id] ?? '')}${it.installments > 1 ? ` · ${t('splitInto', it.installments)}` : ''}${it.due_date ? ` · ${t('dueOn', md(it.due_date))}` : ''}`
       : kindLabel[it.kind];
     const showCategory = (it.kind === 'expense' || it.kind === 'bnpl') && it.note && it.category;
     return `<div class="row">
@@ -441,13 +463,14 @@ function viewSettings(f) {
   <h2>${t('methodsTitle')}</h2>
   <div class="list">${state.payment_methods.length
     ? state.payment_methods.map((m) => `<div class="row">
-        <div class="main"><div class="title">${esc(m.name)}</div><div class="meta">${t('methodMeta', m.closing_day, m.due_day > m.closing_day, m.due_day)}</div></div>
+        <div class="main"><div class="title">${esc(m.name)}</div><div class="meta">${hasSchedule(m) ? t('methodMeta', m.closing_day, m.due_day > m.closing_day, m.due_day) : t('methodManual')}</div></div>
         <button class="danger" data-action="delete" data-table="payment_methods" data-id="${esc(m.id)}" aria-label="${t('delete')}">✕</button>
       </div>`).join('')
     : `<div class="empty">${t('none')}</div>`}</div>
   <form class="stack card" data-form="method" style="margin-top:10px">
     <label>${t('name')}<input name="name" required placeholder="${t('methodPlaceholder')}"></label>
-    <div class="grid2">
+    <label class="check"><input type="checkbox" name="no_schedule" value="1"><span>${t('noSchedule')}</span></label>
+    <div class="grid2 schedule-fields">
       <label>${t('closingDay')}<input type="number" name="closing_day" min="1" max="31" required inputmode="numeric"><span class="hint">${t('closingHint')}</span></label>
       <label>${t('dueDay')}<input type="number" name="due_day" min="1" max="31" required inputmode="numeric"><span class="hint">${t('dueHint')}</span></label>
     </div>
@@ -503,9 +526,13 @@ const forms = {
   },
   expense: (d) => mutate(() => db.insert('transactions', { date: d.date, kind: 'expense', amount: Number(d.amount), category: d.category, note: d.note }), t('expenseSaved')),
   income: (d) => mutate(() => db.insert('transactions', { date: d.date, kind: 'income', amount: Number(d.amount), category: '收入', note: d.note }), t('incomeSaved')),
-  bnpl: (d) => mutate(() => db.insert('purchases', {
-    method_id: d.method_id, date: d.date, amount: Number(d.amount), installments: Number(d.installments), category: d.category, note: d.note,
-  }), t('bnplSaved')),
+  bnpl(d) {
+    const method = state.payment_methods.find((m) => m.id === d.method_id);
+    const row = { method_id: d.method_id, date: d.date, amount: Number(d.amount), installments: Number(d.installments), category: d.category, note: d.note };
+    // 只有自己填繳款日時才送 due_date 欄位
+    if ((d.manual_due || !hasSchedule(method)) && d.due_date) row.due_date = d.due_date;
+    return mutate(() => db.insert('purchases', row), t('bnplSaved'));
+  },
   settings: (d) => mutate(() => db.saveSettings({
     ...state.settings, allowance_5: Number(d.allowance_5), allowance_20: Number(d.allowance_20), reserve: Number(d.reserve),
   }), t('saved')),
@@ -516,7 +543,9 @@ const forms = {
       date: today(), kind: diff > 0 ? 'income' : 'expense', amount: Math.abs(diff), category: '其他', note: '餘額校正', source: 'adjust',
     }), t('adjusted', `${diff > 0 ? '+' : ''}${money(diff)}`));
   },
-  method: (d) => mutate(() => db.insert('payment_methods', { name: d.name, closing_day: Number(d.closing_day), due_day: Number(d.due_day) }), t('added')),
+  method: (d) => mutate(() => db.insert('payment_methods', d.no_schedule
+    ? { name: d.name, closing_day: null, due_day: null }
+    : { name: d.name, closing_day: Number(d.closing_day), due_day: Number(d.due_day) }), t('added')),
   recurring: (d) => mutate(() => db.insert('recurring', { name: d.name, amount: Number(d.amount), day: Number(d.day), start_date: today(), active: true }), t('added')),
 };
 
@@ -536,6 +565,11 @@ $app.addEventListener('submit', async (e) => {
 
 $app.addEventListener('input', (e) => {
   if (e.target.closest('form[data-form="bnpl"]')) updateBnplPreview();
+  if (e.target.name === 'no_schedule') {
+    const fields = e.target.form.querySelector('.schedule-fields');
+    fields.hidden = e.target.checked;
+    fields.querySelectorAll('input').forEach((input) => { input.required = !e.target.checked; });
+  }
   if (e.target.dataset.input === 'month' && e.target.value) {
     state.month = e.target.value;
     render();

@@ -17,9 +17,10 @@ create table if not exists payment_methods (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
   name text not null,
-  closing_day int not null check (closing_day between 1 and 31),  -- 結帳日
-  due_day int not null check (due_day between 1 and 31),          -- 繳款日
-  created_at timestamptz not null default now()
+  closing_day int check (closing_day between 1 and 31),  -- 結帳日（空白 = 每筆自己填繳款日）
+  due_day int check (due_day between 1 and 31),          -- 繳款日
+  created_at timestamptz not null default now(),
+  constraint payment_methods_schedule_both check ((closing_day is null) = (due_day is null))
 );
 
 -- 先用後付的消費（可分期）
@@ -30,6 +31,7 @@ create table if not exists purchases (
   date date not null,
   amount numeric(12,2) not null check (amount > 0),
   installments int not null default 1 check (installments between 1 and 60),
+  due_date date,               -- 自己指定的（第一期）繳款日；空白 = 照結帳日算
   category text,
   note text,
   created_at timestamptz not null default now()

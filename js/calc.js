@@ -53,6 +53,21 @@ export function dueDateFor(purchaseDate, method, offset = 0) {
   return fmt(dayOfMonth(closing.getFullYear(), dueMonth, method.due_day));
 }
 
+// 付款方式有沒有固定的結帳日／繳款日（沒有的話每筆自己填繳款日）
+export const hasSchedule = (method) => Boolean(method?.closing_day && method?.due_day);
+
+// 一筆消費第 i 期（從 0 起算）的繳款日：
+// 有自己填的繳款日就以它為第一期，之後每月同一天；否則照付款方式的結帳日算
+export function installmentDue(purchase, method, i = 0) {
+  if (purchase.due_date) {
+    const first = parse(purchase.due_date);
+    return fmt(dayOfMonth(first.getFullYear(), first.getMonth() + i, first.getDate()));
+  }
+  if (hasSchedule(method)) return dueDateFor(purchase.date, method, i);
+  // 沒有結帳日又沒填繳款日（理論上不會發生）：當作消費當天起每月繳
+  return installmentDue({ due_date: purchase.date }, method, i);
+}
+
 // 把分期總額拆成每期金額，除不盡的零頭放第一期
 export function splitInstallments(amount, n) {
   const base = Math.floor(amount / n);
@@ -68,7 +83,7 @@ export function buildBills(methods, purchases, transactions) {
     if (!method) continue;
     const n = Math.max(1, Number(p.installments) || 1);
     splitInstallments(Number(p.amount), n).forEach((amount, i) => {
-      const due = dueDateFor(p.date, method, i);
+      const due = installmentDue(p, method, i);
       const key = `${method.id}|${due}`;
       if (!bills.has(key)) bills.set(key, { key, method_id: method.id, method_name: method.name, due, total: 0, paid: 0, items: [] });
       const bill = bills.get(key);
