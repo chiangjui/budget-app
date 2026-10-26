@@ -57,6 +57,16 @@ export async function saveSettings(settings) {
   check(await sb.from('settings').upsert({ ...settings, user_id: user.id }));
 }
 
+// ---- 推播訂閱（示範模式不支援） ----
+
+export async function savePushSubscription(row) {
+  check(await sb.from('push_subscriptions').upsert(row, { onConflict: 'endpoint' }));
+}
+
+export async function deletePushSubscription(endpoint) {
+  check(await sb.from('push_subscriptions').delete().eq('endpoint', endpoint));
+}
+
 // ---- 一般資料表 ----
 
 export async function list(table) {

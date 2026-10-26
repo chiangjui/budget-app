@@ -108,6 +108,19 @@ python3 -m http.server 8765
 
 ---
 
+## 繳款提醒通知
+
+帳單和固定支出到期前 3、2、1 天，每天早上 9 點推播到手機。
+
+- **怎麼運作**：GitHub Actions（[`.github/workflows/reminders.yml`](.github/workflows/reminders.yml)）每天台灣時間 9:00 執行 [`scripts/send-reminders.mjs`](scripts/send-reminders.mjs)，算出 3 天內要繳的款項，用 Web Push 送到開了通知的裝置。順便讓 Supabase 每天都有使用，不會被暫停。
+- **iPhone**：要 iOS 16.4 以上，先「加入主畫面」，從主畫面打開 → 設定 → 繳款提醒通知 → 開啟通知。
+- **需要的 GitHub Secrets**（repo → Settings → Secrets and variables → Actions）：
+  - `SUPABASE_SECRET_KEY`：Supabase → Project Settings → API Keys → Secret keys
+  - `VAPID_PRIVATE_KEY`：推播私鑰（對應 `config.js` 裡的 `VAPID_PUBLIC_KEY`）
+- **資料庫**：先跑 [`supabase/migrations/003_push_subscriptions.sql`](supabase/migrations/003_push_subscriptions.sql)
+- **手動測試**：GitHub repo → Actions → 繳款提醒 → Run workflow，勾「送一則測試通知」
+- GitHub 規定：repo 連續 60 天沒有任何 commit，排程會被自動停用，到 Actions 頁面按一下重新啟用即可。
+
 ## 檔案結構
 
 ```

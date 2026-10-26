@@ -1,0 +1,12 @@
+{
+  "name": "budget-app",
+  "private": true,
+  "type": "module",
+  "description": "零用錢管家：每日繳款提醒推播（GitHub Actions 執行）",
+  "scripts": {
+    "remind": "node scripts/send-reminders.mjs"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

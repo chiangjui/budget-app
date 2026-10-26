@@ -1,5 +1,6 @@
 import * as db from './db.js';
-import { today, parse, addDays, forecast, installmentDue, hasSchedule, splitInstallments, recurringDue, allowanceDates, currentBalance } from './calc.js';
+import * as config from '../config.js';
+import { today, parse, addDays, daysBetween, forecast, installmentDue, hasSchedule, splitInstallments, recurringDue, allowanceDates, currentBalance } from './calc.js';
 import { t, lang, setLang, category, weekday } from './i18n.js';
 
 // 分類存進資料庫時用中文，顯示時再翻譯
@@ -90,7 +91,7 @@ async function boot() {
     state.user = await db.getUser();
     if (!state.user) return renderLogin();
     await loadAll();
-    render();
+    render({ animate: true, intro: true });
   } catch (e) {
     console.error(e);
     $app.innerHTML = `<div class="auth"><h1>${t('errorTitle')}</h1><p>${esc(e.message)}</p><button data-action="reload">${t('reload')}</button></div>`;
@@ -98,7 +99,7 @@ async function boot() {
 }
 
 // 依目前狀態重畫整個畫面（切換語言時用）
-const rerender = () => (state.user ? render() : renderLogin());
+const rerender = () => (state.user ? render({ animate: true }) : renderLogin());
 
 // 執行一個會改資料的動作，完成後重新載入畫面
 async function mutate(fn, msg) {
@@ -140,7 +141,30 @@ function masthead() {
 
 // ---- 畫面：登入、初次設定 ----
 
+// 進場動畫：animate = 內容依序浮上來；intro = 第一次打開時刊頭粗線畫出來
+function setMotion({ animate = false, intro = false } = {}) {
+  $app.classList.toggle('animate', animate);
+  $app.classList.toggle('intro', intro);
+}
+
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 大數字從 0 數到目標值
+function countUp(el, ms = 700) {
+  const to = Number(el.dataset.to);
+  if (reduceMotion() || !(to > 0)) return;
+  const start = performance.now();
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / ms);
+    el.textContent = Math.round(to * (1 - (1 - p) ** 3)).toLocaleString('en-US');
+    if (p < 1) requestAnimationFrame(step);
+  };
+  el.textContent = '0';
+  requestAnimationFrame(step);
+}
+
 function renderLogin() {
+  setMotion({ animate: true, intro: true });
   $app.innerHTML = `
   <div class="auth">
     <div class="kicker"><span>${t('kicker')}</span>${langToggle()}</div>
@@ -159,6 +183,7 @@ function renderLogin() {
 }
 
 function renderSetup() {
+  setMotion({ animate: true, intro: true });
   $app.innerHTML = `
   <div class="auth">
     <div class="kicker"><span>${t('setupKicker')}</span>${langToggle()}</div>
@@ -179,8 +204,9 @@ function renderSetup() {
 
 // ---- 畫面：主架構 ----
 
-function render() {
+function render(motion = {}) {
   if (!state.settings) return renderSetup();
+  setMotion(motion);
   const f = forecast(calcState());
   const views = { home: viewHome, add: viewAdd, bills: viewBills, history: viewHistory, settings: viewSettings };
   const tabs = [
@@ -193,11 +219,93 @@ function render() {
   $app.innerHTML = `
     ${masthead()}
     ${db.demo ? `<div class="banner"><b class="badge">${t('demoBadge')}</b><span>${t('demoText')}</span></div>` : ''}
-    ${views[state.tab](f)}
+    <main class="view">${views[state.tab](f)}</main>
     <nav class="tabs" aria-label="${t('mainNav')}"><div class="inner">
       ${tabs.map(([id, name]) => `<button data-action="tab" data-tab="${id}" class="${state.tab === id ? 'on' : ''}" ${state.tab === id ? 'aria-current="page"' : ''}>${icon(id)}${name}</button>`).join('')}
     </div></nav>`;
   if (state.tab === 'add' && state.addMode === 'bnpl') updateBnplPreview();
+  if (motion.animate) $app.querySelectorAll('[data-to]').forEach((el) => countUp(el));
+  if (state.tab === 'settings') refreshPush();
+}
+
+// ---- 推播通知 ----
+
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+// 推播用的公鑰要轉成位元組
+function base64ToBytes(base64) {
+  const raw = atob((base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function pushStatus() {
+  if (db.demo) return 'demo';
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // iPhone 的 Safari 只有從主畫面打開時才支援推播
+  if (!supported) return isIOS && !isStandalone() ? 'needHome' : 'unsupported';
+  if (!config.VAPID_PUBLIC_KEY) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  const reg = await navigator.serviceWorker.ready;
+  return (await reg.pushManager.getSubscription()) ? 'on' : 'off';
+}
+
+const pushCardHtml = (status) => `
+  <div><b class="badge ${status === 'on' ? '' : 'info'}" style="margin:0">${t(status === 'on' ? 'pushBadgeOn' : 'pushBadgeOff')}</b></div>
+  <p style="margin:0">${t(`push_${status}`)}</p>
+  ${status === 'off' ? `<button data-action="push-on">${t('pushEnable')}</button>` : ''}
+  ${status === 'on' ? `<div class="push-actions"><button class="secondary small" data-action="push-test">${t('pushTest')}</button><button class="ghost" data-action="push-off">${t('pushDisable')}</button></div>` : ''}`;
+
+async function refreshPush() {
+  const card = document.getElementById('push-card');
+  if (!card) return;
+  state.push = await pushStatus().catch(() => 'unsupported');
+  card.innerHTML = pushCardHtml(state.push);
+}
+
+// 把這台裝置的訂閱存到資料庫（語言也一起存，通知才會用對的語言）
+async function saveSubscription(sub) {
+  const { endpoint, keys } = sub.toJSON();
+  await db.savePushSubscription({ endpoint, p256dh: keys.p256dh, auth: keys.auth, lang });
+}
+
+async function enablePush() {
+  try {
+    if (await Notification.requestPermission() !== 'granted') {
+      toast(t('pushDeniedToast'));
+      return refreshPush();
+    }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription()
+      ?? await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(config.VAPID_PUBLIC_KEY) });
+    await saveSubscription(sub);
+    toast(t('pushOnToast'));
+  } catch (e) {
+    console.error(e);
+    toast(t('failed', e.message));
+  }
+  refreshPush();
+}
+
+async function disablePush() {
+  try {
+    const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    if (sub) {
+      await db.deletePushSubscription(sub.endpoint);
+      await sub.unsubscribe();
+    }
+    toast(t('pushOffToast'));
+  } catch (e) {
+    console.error(e);
+    toast(t('failed', e.message));
+  }
+  refreshPush();
+}
+
+// 在這台裝置上直接跳一則通知，確認看得到
+async function testPush() {
+  const reg = await navigator.serviceWorker.ready;
+  await reg.showNotification(t('pushTestTitle'), { body: t('pushTestBody'), icon: 'icons/icon-192.png', tag: 'test' });
 }
 
 // 未來事件的顯示名稱
@@ -223,15 +331,37 @@ function eventRow(e, { showRunning = false, warnBelow = null } = {}) {
 
 // ---- 首頁 ----
 
+// 三天內要繳（或已經逾期）的帳單和固定支出
+const REMIND_DAYS = 3;
+function reminderStrip(f) {
+  const due = f.events.filter((e) => (e.type === 'bill' || e.type === 'recurring') && daysBetween(today(), e.due) <= REMIND_DAYS);
+  if (!due.length) return '';
+  return `<section class="alert" role="status">
+    <div class="alert-k">${t('reminderTitle')}</div>
+    ${due.map((e) => {
+      const button = e.type === 'bill'
+        ? `<button class="small secondary" data-action="pay-bill" data-key="${esc(e.key)}">${t('pay')}</button>`
+        : `<button class="small secondary" data-action="pay-rec" data-id="${esc(e.rid)}" data-date="${e.due}">${t('markPaid')}</button>`;
+      return `<div class="alert-row">
+        <div class="main"><div class="title">${esc(eventLabel(e))}</div><div class="meta">${t('dueIn', daysBetween(today(), e.due), md(e.due))}</div></div>
+        <div class="amt">${money(-e.amount)}</div>
+        ${button}
+      </div>`;
+    }).join('')}
+  </section>`;
+}
+
 function viewHome(f) {
   const ok = f.safe >= 0;
   const reserve = f.reserve > 0 ? money(f.reserve) : '';
   const outflows = f.events.filter((e) => e.amount < 0).slice(0, 4);
   const timeline = f.events.filter((e) => e.date <= addDays(today(), 62));
+  const safe = Math.round(Math.max(0, f.safe));
   return `
+  ${reminderStrip(f)}
   <section class="hero ${ok ? 'ok' : 'bad'}">
     <div class="label">${ok ? t('safeOk') : t('safeBad')}</div>
-    <div class="big"><span class="cur">$</span>${Math.round(Math.max(0, f.safe)).toLocaleString('en-US')}</div>
+    <div class="big"><span class="cur">$</span><span data-to="${safe}">${safe.toLocaleString('en-US')}</span></div>
     <div class="sub">${ok ? t('subOk', reserve) : t('subBad', f.minDate === today() ? '' : md(f.minDate), money(-f.safe), reserve)}</div>
   </section>
   <div class="stats">
@@ -494,6 +624,9 @@ function viewSettings(f) {
     <button class="secondary">${t('addRecurring')}</button>
   </form>
 
+  <h2>${t('pushTitle')}</h2>
+  <div class="card push-card" id="push-card"><p class="muted" style="margin:0">…</p></div>
+
   <h2>${t('account')}</h2>
   <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
     <span style="overflow:hidden;text-overflow:ellipsis">${db.demo ? t('demoBadge') : esc(state.user.email)}</span>
@@ -589,22 +722,31 @@ $app.addEventListener('click', async (e) => {
   const { action } = el.dataset;
   if (action === 'tab') {
     state.tab = el.dataset.tab;
-    render();
+    render({ animate: true });
     window.scrollTo(0, 0);
   } else if (action === 'lang') {
     if (el.dataset.lang !== lang) {
       setLang(el.dataset.lang);
       rerender();
+      if (state.push === 'on') {
+        navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()).then((sub) => sub && saveSubscription(sub)).catch(console.error);
+      }
     }
   } else if (action === 'add-mode') {
     state.addMode = el.dataset.mode;
-    render();
+    render({ animate: true });
   } else if (action === 'pay-bill') {
     await payBill(el.dataset.key);
   } else if (action === 'pay-rec') {
     await payRecurring(el.dataset.id, el.dataset.date);
   } else if (action === 'delete') {
     if (confirm(t(deleteWarnings[el.dataset.table]))) await mutate(() => db.remove(el.dataset.table, el.dataset.id), t('deleted'));
+  } else if (action === 'push-on') {
+    await enablePush();
+  } else if (action === 'push-off') {
+    await disablePush();
+  } else if (action === 'push-test') {
+    await testPush().catch((err) => toast(t('failed', err.message)));
   } else if (action === 'logout') {
     await db.signOut();
     state.settings = null;
@@ -615,4 +757,5 @@ $app.addEventListener('click', async (e) => {
 });
 
 document.querySelector('.loading')?.replaceChildren(t('loading'));
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(console.error);
 boot();
